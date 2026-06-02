@@ -5,5 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.136.3",
+    "google-genai>=2.7.0",
+    "jinja2>=3.1.6",
+    "pandas>=3.0.3",
+    "pinecone>=9.0.1",
+    "pypdf>=6.12.2",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.30",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.5.1",
+    "uvicorn>=0.48.0",
 ]

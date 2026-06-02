@@ -1,0 +1,7 @@
+document_id,filename,chunk_id,pinecone_id,created_at
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,0,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_0,2026-06-02T19:10:37.483928+00:00
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,1,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_1,2026-06-02T19:10:37.483928+00:00
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,2,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_2,2026-06-02T19:10:37.483928+00:00
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,3,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_3,2026-06-02T19:10:37.483928+00:00
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,4,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_4,2026-06-02T19:10:37.483928+00:00
+290f12cf-9ce0-48e4-bed1-e693443cbab4,policy.txt,5,290f12cf-9ce0-48e4-bed1-e693443cbab4_chunk_5,2026-06-02T19:10:37.483928+00:00

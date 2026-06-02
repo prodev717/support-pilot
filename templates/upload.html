@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Support Pilot</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 20px;
+        }
+
+        .section {
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 8px 16px;
+        }
+
+        input[type="text"] {
+            width: 350px;
+            padding: 8px;
+        }
+
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            overflow-x: auto;
+        }
+
+        .result {
+            margin-top: 10px;
+        }
+
+        .doc-card {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>Support Pilot</h1>
+
+<!-- ========================================= -->
+<!-- Upload -->
+<!-- ========================================= -->
+
+<div class="section">
+
+    <h2>Upload Document</h2>
+
+    <form id="uploadForm">
+        <input
+            type="file"
+            id="file"
+            accept=".pdf,.docx,.txt"
+            required
+        >
+
+        <div style="margin-top:10px;">
+            <label for="chunk_size">Chunk size:</label>
+            <input type="number" id="chunk_size" name="chunk_size" value="1000" min="1">
+            &nbsp;
+            <label for="overlap">Overlap:</label>
+            <input type="number" id="overlap" name="overlap" value="200" min="0">
+        </div>
+
+        <button type="submit">
+            Upload
+        </button>
+    </form>
+
+    <div id="uploadResult" class="result"></div>
+
+</div>
+
+<!-- ========================================= -->
+<!-- Search -->
+<!-- ========================================= -->
+
+<div class="section">
+
+    <h2>Search Knowledge Base</h2>
+
+    <input
+        type="text"
+        id="query"
+        placeholder="Ask something..."
+    >
+
+    <button onclick="searchDocuments()">
+        Search
+    </button>
+
+    <div id="searchResults"></div>
+
+</div>
+
+<!-- ========================================= -->
+<!-- Documents -->
+<!-- ========================================= -->
+
+<div class="section">
+
+    <h2>Documents</h2>
+
+    <button onclick="loadDocuments()">
+        Refresh Documents
+    </button>
+
+    <div id="documents"></div>
+
+</div>
+
+<script>
+
+document
+.getElementById("uploadForm")
+.addEventListener("submit", async (e) => {
+
+    e.preventDefault();
+
+    const fileInput =
+        document.getElementById("file");
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    const chunkSizeInput = document.getElementById("chunk_size");
+    const overlapInput = document.getElementById("overlap");
+    if (chunkSizeInput && chunkSizeInput.value) {
+        formData.append("chunk_size", chunkSizeInput.value);
+    }
+    if (overlapInput && overlapInput.value) {
+        formData.append("overlap", overlapInput.value);
+    }
+
+    const response =
+        await fetch("/upload", {
+            method: "POST",
+            body: formData
+        });
+
+    const data =
+        await response.json();
+
+    document.getElementById(
+        "uploadResult"
+    ).innerHTML =
+        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+    loadDocuments();
+});
+
+
+
+async function searchDocuments() {
+
+    const query =
+        document.getElementById("query").value;
+
+    if (!query) return;
+
+    const response =
+        await fetch(
+            `/search?query=${encodeURIComponent(query)}`
+        );
+
+    const data =
+        await response.json();
+
+    let html = "";
+
+    data.results.forEach(result => {
+
+        html += `
+            <div class="doc-card">
+
+                <strong>
+                    ${result.filename}
+                </strong>
+
+                <br>
+
+                Score:
+                ${result.score.toFixed(3)}
+
+                <br>
+
+                Chunk:
+                ${result.chunk_id}
+
+                <pre>
+${result.text}
+                </pre>
+
+            </div>
+        `;
+    });
+
+    document.getElementById(
+        "searchResults"
+    ).innerHTML = html;
+}
+
+
+
+async function loadDocuments() {
+
+    const response =
+        await fetch("/documents");
+
+    const docs =
+        await response.json();
+
+    let html = "";
+
+    docs.forEach(doc => {
+
+        html += `
+            <div class="doc-card">
+
+                <strong>
+                    ${doc.filename}
+                </strong>
+
+                <br>
+
+                Chunks:
+                ${doc.chunks}
+
+                <br><br>
+
+                <small>
+                    ${doc.document_id}
+                </small>
+
+                <br><br>
+
+                <button
+                    onclick="deleteDocument('${doc.document_id}')"
+                >
+                    Delete
+                </button>
+
+            </div>
+        `;
+    });
+
+    document.getElementById(
+        "documents"
+    ).innerHTML = html;
+}
+
+
+
+async function deleteDocument(documentId) {
+
+    if (
+        !confirm(
+            "Delete this document?"
+        )
+    ) {
+        return;
+    }
+
+    const response =
+        await fetch(
+            `/documents/${documentId}`,
+            {
+                method: "DELETE"
+            }
+        );
+
+    const data =
+        await response.json();
+
+    alert(
+        `Deleted ${data.chunks_deleted} chunks`
+    );
+
+    loadDocuments();
+}
+
+loadDocuments();
+
+</script>
+
+</body>
+</html>
