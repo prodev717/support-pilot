@@ -3,7 +3,8 @@ from pathlib import Path
 from io import BytesIO
 from uuid import uuid4
 from datetime import datetime, UTC
-import pandas as pd
+from contextlib import asynccontextmanager
+import psycopg
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
@@ -18,12 +19,12 @@ from fastapi.templating import Jinja2Templates
 from pypdf import PdfReader
 from docx import Document
 from pinecone import Pinecone
-from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY missing")
@@ -31,7 +32,8 @@ if not PINECONE_API_KEY:
 if not PINECONE_INDEX_NAME:
     raise ValueError("PINECONE_INDEX_NAME missing")
 
-CSV_FILE = "metadata.csv"
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL missing")
 
 ALLOWED_EXTENSIONS = {
     ".pdf",
@@ -39,13 +41,33 @@ ALLOWED_EXTENSIONS = {
     ".txt"
 }
 
-app = FastAPI()
+def init_db():
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS document_metadata (
+                    id SERIAL PRIMARY KEY,
+                    document_id VARCHAR(255) NOT NULL,
+                    filename VARCHAR(255) NOT NULL,
+                    chunk_id INT NOT NULL,
+                    pinecone_id VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_document_metadata_document_id 
+                ON document_metadata(document_id);
+            """)
+            conn.commit()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
-
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
@@ -72,30 +94,36 @@ def extract_docx_text(content: bytes) -> str:
     )
 
 def save_metadata(rows: list[dict]):
-    df = pd.DataFrame(rows)
-    if Path(CSV_FILE).exists():
-        df.to_csv(CSV_FILE, mode="a", header=False, index=False)
-    else:
-        df.to_csv(CSV_FILE, index=False)
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.executemany("""
+                INSERT INTO document_metadata (document_id, filename, chunk_id, pinecone_id, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+            """, [
+                (
+                    row["document_id"],
+                    row["filename"],
+                    row["chunk_id"],
+                    row["pinecone_id"],
+                    row["created_at"]
+                ) for row in rows
+            ])
+            conn.commit()
 
 def store_chunks(filename: str, chunks: list[str]):
     document_id = str(uuid4())
     upload_time = datetime.now(UTC).isoformat()
-    embeddings = embedding_model.encode(chunks).tolist()
-    vectors = []
+    records = []
     metadata_rows = []
-    for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+    for i, chunk in enumerate(chunks):
         vector_id = f"{document_id}_chunk_{i}"
-        vectors.append({
-            "id": vector_id,
-            "values": embedding,
-            "metadata": {
-                "document_id": document_id,
-                "filename": filename,
-                "chunk_id": i,
-                "upload_time": upload_time,
-                "text": chunk
-            }
+        records.append({
+            "_id": vector_id,
+            "text": chunk,
+            "document_id": document_id,
+            "filename": filename,
+            "chunk_id": i,
+            "upload_time": upload_time
         })
         metadata_rows.append({
             "document_id": document_id,
@@ -104,35 +132,43 @@ def store_chunks(filename: str, chunks: list[str]):
             "pinecone_id": vector_id,
             "created_at": upload_time
         })
-    batch_size = 100
-    for i in range(0, len(vectors), batch_size):
-        index.upsert(vectors=vectors[i:i+batch_size])
+    index.upsert_records(
+        namespace="support-pilot",
+        records=records
+    )
     save_metadata(metadata_rows)
     return document_id
 
 def search_chunks(query: str, top_k: int = 5):
-    query_embedding = embedding_model.encode(query).tolist()
-    result = index.query(vector=query_embedding, top_k=top_k, include_metadata=True)
+    result = index.search(
+        namespace="support-pilot",
+        top_k=top_k,
+        inputs={"text": query}
+    )
     return result
 
 def delete_document(document_id: str):
-    if not Path(CSV_FILE).exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Metadata file not found"
-        )
-    df = pd.read_csv(CSV_FILE)
-    rows = df[df["document_id"]== document_id]
-    if rows.empty:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found"
-        )
-    ids = rows["pinecone_id"].tolist()
-    index.delete(ids=ids)
-    df = df[df["document_id"]!= document_id]
-    df.to_csv(CSV_FILE, index=False)
-    return len(ids)
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT pinecone_id 
+                FROM document_metadata 
+                WHERE document_id = %s
+            """, (document_id,))
+            rows = cur.fetchall()
+            if not rows:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Document not found"
+                )
+            ids = [row[0] for row in rows]
+            index.delete(ids=ids, namespace="support-pilot")
+            cur.execute("""
+                DELETE FROM document_metadata 
+                WHERE document_id = %s
+            """, (document_id,))
+            conn.commit()
+            return len(ids)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -190,19 +226,19 @@ async def upload_document(
 
 @app.get("/search")
 async def search(query: str, top_k: int = 5):
+    try:
+        top_k = int(top_k)
+    except Exception:
+        raise HTTPException(status_code=400, detail="top_k must be an integer")
     results = search_chunks(query=query, top_k=top_k)
     matches = []
-    for match in results["matches"]:
+    for hit in results.result.hits:
         matches.append({
-            "score": match["score"],
-            "document_id":
-                match["metadata"]["document_id"],
-            "filename":
-                match["metadata"]["filename"],
-            "chunk_id":
-                match["metadata"]["chunk_id"],
-            "text":
-                match["metadata"]["text"]
+            "score": hit.score,
+            "document_id": hit.fields.get("document_id"),
+            "filename": hit.fields.get("filename"),
+            "chunk_id": int(hit.fields.get("chunk_id", 0)),
+            "text": hit.fields.get("text")
         })
     return {
         "query": query,
@@ -222,8 +258,20 @@ async def remove_document(document_id: str):
 
 @app.get("/documents")
 async def list_documents():
-    if not Path(CSV_FILE).exists():
-        return []
-    df = pd.read_csv(CSV_FILE)
-    docs = df.groupby(["document_id", "filename"]).size().reset_index(name="chunks")
-    return docs.to_dict(orient="records")
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT document_id, filename, COUNT(*) as chunks 
+                FROM document_metadata 
+                GROUP BY document_id, filename
+                ORDER BY filename
+            """)
+            rows = cur.fetchall()
+            return [
+                {
+                    "document_id": row[0],
+                    "filename": row[1],
+                    "chunks": row[2]
+                }
+                for row in rows
+            ]
