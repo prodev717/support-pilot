@@ -11,6 +11,7 @@ EMAIL_USER=os.getenv("EMAIL_USER")
 EMAIL_PASS=os.getenv("EMAIL_PASS")
 GEMINI_API_KEY=os.getenv("GEMINI_API_KEY")
 SERVER_URL=os.getenv("SERVER_URL")
+SIMILARITY_THRESHOLD = 0.40
 
 client=genai.Client(api_key=GEMINI_API_KEY)
 
@@ -27,13 +28,17 @@ def search_documents(query):
         response=requests.get(url,timeout=20)
         response.raise_for_status()
         data=response.json()
-        return [result["text"] for result in data.get("results",[])]
+        return [
+            result["text"] 
+            for result in data.get("results", []) 
+            if result.get("score", 0.0) >= SIMILARITY_THRESHOLD
+        ]
     except Exception as e:
         print(f"Search error: {e}")
         return []
 
 def create_search_query(email_body):
-    prompt=f"Extract the main customer issue from the email below and return only a short search query.\n\nEmail:\n{email_body}"
+    prompt=f"Generate a semantic search query for retrieving support documents based on the customer email below. Return only keywords.\n\nEmail:\n{email_body}"
     return generate_reply(prompt).strip()
 
 def extract_email_body(msg):
@@ -55,7 +60,32 @@ def extract_email_body(msg):
 def generate_ai_reply(subject,email_body):
     query=create_search_query(email_body)
     docs=search_documents(query)
-    context="\n\n".join(docs[:5]) if docs else "No matching knowledge base articles found."
+    
+    if not docs:
+        prompt=f"""You are a professional customer support agent for Support-Pilot.
+
+Customer Subject:
+{subject}
+
+Customer Email:
+{email_body}
+
+Situation:
+No matching knowledge base information is available to answer this customer's question.
+
+Instructions:
+- Do not attempt to answer the customer's question or provide any solution.
+- Politely inform the customer that the request has been escalated to Team Support-Pilot for manual assistance.
+- Write a complete, polite escalation email response.
+- Always sign off using:
+
+Best regards,
+Team Support-Pilot
+
+Reply:"""
+        return generate_reply(prompt)
+        
+    context="\n\n".join(docs[:5])
     prompt=f"""You are a professional customer support agent.
 
 Customer Subject:
@@ -71,7 +101,7 @@ Instructions:
 - You are a customer support agent for Support-Pilot.
 - Answer using the provided knowledge base whenever possible.
 - Do not make up policies, features, timelines, pricing, or technical details.
-- If the knowledge base does not contain enough information to answer confidently, politely inform the customer that the issue has been escalated to Team Support-Pilot for further assistance.
+- If the knowledge base does not contain enough information to answer confidently, do not answer the customer's question. Instead, politely inform the customer that the issue has been escalated to Team Support-Pilot for further assistance.
 - Be professional, concise, and helpful.
 - Write a complete email response.
 - Address the customer's question directly.
