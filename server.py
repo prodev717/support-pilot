@@ -1,191 +1,47 @@
-import os
-import tempfile
 from pathlib import Path
-from uuid import uuid4
-from datetime import datetime, UTC
 from contextlib import asynccontextmanager
-
-from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pinecone import Pinecone
-from sqlalchemy import Column, Integer, String, DateTime, func, create_engine
-from sqlalchemy.orm import DeclarativeBase, Session
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from sqlalchemy.orm import Session
+from sqlalchemy import func
 
-load_dotenv()
-
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-DATABASE_URL = os.getenv("DATABASE_URL")
-PINECONE_NAMESPACE = "support-pilot"
-
-if not PINECONE_API_KEY:
-    raise ValueError("PINECONE_API_KEY missing")
-if not PINECONE_INDEX_NAME:
-    raise ValueError("PINECONE_INDEX_NAME missing")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL missing")
+from database import engine, Base, Email, DocumentMetadata, Ticket
+from schemas import EmailCreate, EmailUpdate, TicketCreate, TicketUpdate, TicketSendDraft
+from services import (
+    extract_text,
+    chunk_text,
+    store_chunks,
+    search_chunks,
+    delete_document,
+)
+from email_service import reply_in_thread, send_email
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
-# ---------------------------------------------------------------------------
-# SQLAlchemy ORM
-# ---------------------------------------------------------------------------
-
-# psycopg3 dialect: postgresql+psycopg://
-_db_url = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-engine = create_engine(_db_url, pool_pre_ping=True)
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-class DocumentMetadata(Base):
-    __tablename__ = "document_metadata"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    document_id = Column(String(255), nullable=False, index=True)
-    filename = Column(String(255), nullable=False)
-    chunk_id = Column(Integer, nullable=False)
-    pinecone_id = Column(String(255), nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-
-
-# ---------------------------------------------------------------------------
-# FastAPI lifespan — create tables if they don't exist
-# ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     yield
 
+
 app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
-# ---------------------------------------------------------------------------
-# Pinecone
-# ---------------------------------------------------------------------------
-
-pc = Pinecone(api_key=PINECONE_API_KEY)
-index = pc.Index(PINECONE_INDEX_NAME)
 
 # ---------------------------------------------------------------------------
-# Document extraction via LangChain loaders
-# ---------------------------------------------------------------------------
-
-def extract_text(content: bytes, extension: str) -> str:
-    """Write bytes to a temp file, load with the appropriate LangChain loader."""
-    suffix = extension  # e.g. ".pdf"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    try:
-        if extension == ".pdf":
-            loader = PyPDFLoader(tmp_path)
-        elif extension == ".docx":
-            loader = Docx2txtLoader(tmp_path)
-        else:  # .txt
-            loader = TextLoader(tmp_path, encoding="utf-8")
-        docs = loader.load()
-        return "\n\n".join(doc.page_content for doc in docs)
-    finally:
-        os.unlink(tmp_path)
-
-# ---------------------------------------------------------------------------
-# Chunking via LangChain RecursiveCharacterTextSplitter
-# ---------------------------------------------------------------------------
-
-def chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> list[str]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    return splitter.split_text(text)
-
-# ---------------------------------------------------------------------------
-# Metadata helpers (ORM)
-# ---------------------------------------------------------------------------
-
-def save_metadata(rows: list[dict]):
-    with Session(engine) as session:
-        session.add_all([
-            DocumentMetadata(
-                document_id=row["document_id"],
-                filename=row["filename"],
-                chunk_id=row["chunk_id"],
-                pinecone_id=row["pinecone_id"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ])
-        session.commit()
-
-
-def store_chunks(filename: str, chunks: list[str]) -> str:
-    document_id = str(uuid4())
-    upload_time = datetime.now(UTC)
-    records = []
-    metadata_rows = []
-    for i, chunk in enumerate(chunks):
-        vector_id = f"{document_id}_chunk_{i}"
-        records.append({
-            "_id": vector_id,
-            "text": chunk,
-            "document_id": document_id,
-            "filename": filename,
-            "chunk_id": i,
-            "upload_time": upload_time,
-        })
-        metadata_rows.append({
-            "document_id": document_id,
-            "filename": filename,
-            "chunk_id": i,
-            "pinecone_id": vector_id,
-            "created_at": upload_time,  # datetime object
-        })
-    index.upsert_records(namespace=PINECONE_NAMESPACE, records=records)
-    save_metadata(metadata_rows)
-    return document_id
-
-
-def search_chunks(query: str, top_k: int = 5):
-    return index.search(
-        namespace=PINECONE_NAMESPACE,
-        top_k=top_k,
-        inputs={"text": query},
-    )
-
-
-def delete_document(document_id: str) -> int:
-    with Session(engine) as session:
-        rows = (
-            session.query(DocumentMetadata)
-            .filter(DocumentMetadata.document_id == document_id)
-            .all()
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Document not found")
-        ids = [row.pinecone_id for row in rows]
-        index.delete(ids=ids, namespace=PINECONE_NAMESPACE)
-        for row in rows:
-            session.delete(row)
-        session.commit()
-        return len(ids)
-
-# ---------------------------------------------------------------------------
-# Routes
+# HTML Dashboard
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(request=request, name="upload.html")
 
+
+# ---------------------------------------------------------------------------
+# Document / Knowledge Base
+# ---------------------------------------------------------------------------
 
 @app.post("/upload")
 async def upload_document(
@@ -249,6 +105,8 @@ async def search(query: str, top_k: int = 5):
 @app.delete("/documents/{document_id}")
 async def remove_document(document_id: str):
     deleted_count = delete_document(document_id)
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
     return {
         "status": "success",
         "document_id": document_id,
@@ -273,3 +131,337 @@ async def list_documents():
             {"document_id": r.document_id, "filename": r.filename, "chunks": r.chunks}
             for r in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# Department Email Routing
+# ---------------------------------------------------------------------------
+
+@app.get("/emails")
+async def list_emails():
+    with Session(engine) as session:
+        rows = session.query(Email).order_by(Email.department).all()
+        return [
+            {
+                "id": r.id,
+                "department": r.department,
+                "email": r.email,
+                "description": r.description,
+            }
+            for r in rows
+        ]
+
+
+@app.post("/emails")
+async def create_email(data: EmailCreate):
+    with Session(engine) as session:
+        new_email = Email(
+            department=data.department,
+            email=data.email,
+            description=data.description,
+        )
+        session.add(new_email)
+        session.commit()
+        session.refresh(new_email)
+        return {
+            "status": "success",
+            "email": {
+                "id": new_email.id,
+                "department": new_email.department,
+                "email": new_email.email,
+                "description": new_email.description,
+            },
+        }
+
+
+@app.put("/emails/{email_id}")
+async def update_email(email_id: int, data: EmailUpdate):
+    with Session(engine) as session:
+        row = session.query(Email).filter(Email.id == email_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Email not found")
+        if data.department is not None:
+            row.department = data.department
+        if data.email is not None:
+            row.email = data.email
+        if data.description is not None:
+            row.description = data.description
+        session.commit()
+        return {
+            "status": "success",
+            "email": {
+                "id": row.id,
+                "department": row.department,
+                "email": row.email,
+                "description": row.description,
+            },
+        }
+
+
+@app.delete("/emails/{email_id}")
+async def delete_email(email_id: int):
+    with Session(engine) as session:
+        row = session.query(Email).filter(Email.id == email_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Email not found")
+        session.delete(row)
+        session.commit()
+        return {"status": "success", "id": email_id}
+
+
+# ---------------------------------------------------------------------------
+# Helper: serialise a Ticket row
+# ---------------------------------------------------------------------------
+
+def _ticket_row(r: Ticket) -> dict:
+    return {
+        "id": r.id,
+        "ticket_id": r.ticket_id,
+        "customer_email": r.customer_email,
+        "subject": r.subject,
+        "body": r.body,
+        "message_id": r.message_id,
+        "thread_id": r.thread_id,
+        "issue": r.issue,
+        "severity": r.severity,
+        "sentiment": r.sentiment,
+        "emotion": r.emotion,
+        "ticket_status": r.ticket_status,
+        "ai_decision": r.ai_decision,
+        "ai_draft_reply": r.ai_draft_reply,
+        "forwarded_to": r.forwarded_to,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tickets — list (one entry per logical ticket_id, latest message metadata)
+# ---------------------------------------------------------------------------
+
+@app.get("/tickets")
+async def list_tickets(status: str | None = None):
+    """
+    Returns one record per logical ticket_id.
+    The record reflects the most-recent message row's metadata.
+    """
+    with Session(engine) as session:
+        # Sub-query: latest `id` per ticket_id
+        sub = (
+            session.query(
+                Ticket.ticket_id,
+                func.max(Ticket.id).label("latest_id"),
+            )
+            .group_by(Ticket.ticket_id)
+            .subquery()
+        )
+
+        q = (
+            session.query(Ticket)
+            .join(sub, Ticket.id == sub.c.latest_id)
+            .order_by(Ticket.created_at.desc())
+        )
+
+        if status:
+            q = q.filter(Ticket.ticket_status == status)
+
+        rows = q.all()
+
+        # Attach message count
+        counts = (
+            session.query(Ticket.ticket_id, func.count(Ticket.id).label("msg_count"))
+            .group_by(Ticket.ticket_id)
+            .all()
+        )
+        count_map = {c.ticket_id: c.msg_count for c in counts}
+
+        result = []
+        for r in rows:
+            d = _ticket_row(r)
+            d["message_count"] = count_map.get(r.ticket_id, 1)
+            result.append(d)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Tickets — detail (full thread / all messages for a ticket_id)
+# ---------------------------------------------------------------------------
+
+@app.get("/tickets/{ticket_id}")
+async def get_ticket(ticket_id: int):
+    """
+    Returns ticket metadata (latest row) plus all conversation messages.
+    """
+    with Session(engine) as session:
+        rows = (
+            session.query(Ticket)
+            .filter(Ticket.ticket_id == ticket_id)
+            .order_by(Ticket.created_at.asc())
+            .all()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+
+        latest = rows[-1]
+        messages = [_ticket_row(r) for r in rows]
+
+        return {
+            **_ticket_row(latest),
+            "messages": messages,
+            "message_count": len(messages),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Tickets — create
+# ---------------------------------------------------------------------------
+
+@app.post("/tickets")
+async def create_ticket(data: TicketCreate):
+    with Session(engine) as session:
+        # Determine ticket_id
+        if data.ticket_id is not None:
+            ticket_id = data.ticket_id
+        else:
+            result = session.query(func.max(Ticket.ticket_id)).scalar()
+            ticket_id = (result or 0) + 1
+
+        new_ticket = Ticket(
+            ticket_id=ticket_id,
+            customer_email=data.customer_email,
+            subject=data.subject,
+            body=data.body,
+            message_id=data.message_id,
+            thread_id=data.thread_id,
+            issue=data.issue,
+            severity=data.severity,
+            sentiment=data.sentiment,
+            emotion=data.emotion,
+            ticket_status=data.ticket_status,
+            ai_decision=data.ai_decision,
+            ai_draft_reply=data.ai_draft_reply,
+            forwarded_to=data.forwarded_to,
+        )
+        session.add(new_ticket)
+        session.commit()
+        session.refresh(new_ticket)
+        return {"status": "success", "ticket": _ticket_row(new_ticket)}
+
+
+# ---------------------------------------------------------------------------
+# Tickets — update (applies to latest row; status/severity/routing propagate)
+# ---------------------------------------------------------------------------
+
+@app.put("/tickets/{ticket_id}")
+async def update_ticket(ticket_id: int, data: TicketUpdate):
+    with Session(engine) as session:
+        rows = (
+            session.query(Ticket)
+            .filter(Ticket.ticket_id == ticket_id)
+            .all()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+
+        # Apply status / severity / routing to ALL rows in the thread
+        for row in rows:
+            if data.ticket_status is not None:
+                row.ticket_status = data.ticket_status
+            if data.severity is not None:
+                row.severity = data.severity
+            if data.forwarded_to is not None:
+                row.forwarded_to = data.forwarded_to
+
+        # Apply message-specific fields only to the latest row
+        latest = max(rows, key=lambda r: r.id)
+        if data.customer_email is not None:
+            latest.customer_email = data.customer_email
+        if data.subject is not None:
+            latest.subject = data.subject
+        if data.body is not None:
+            latest.body = data.body
+        if data.message_id is not None:
+            latest.message_id = data.message_id
+        if data.thread_id is not None:
+            latest.thread_id = data.thread_id
+        if data.issue is not None:
+            latest.issue = data.issue
+        if data.sentiment is not None:
+            latest.sentiment = data.sentiment
+        if data.emotion is not None:
+            latest.emotion = data.emotion
+        if data.ai_decision is not None:
+            latest.ai_decision = data.ai_decision
+        if data.ai_draft_reply is not None:
+            latest.ai_draft_reply = data.ai_draft_reply
+
+        session.commit()
+        return {"status": "success", "ticket": _ticket_row(latest)}
+
+
+# ---------------------------------------------------------------------------
+# Tickets — send draft (approve & send pending AI reply)
+# ---------------------------------------------------------------------------
+
+@app.post("/tickets/{ticket_id}/send-draft")
+async def send_draft(ticket_id: int, data: TicketSendDraft):
+    """
+    Send the (optionally edited) AI draft reply to the customer,
+    then mark all rows in the ticket thread as Closed.
+    """
+    with Session(engine) as session:
+        rows = (
+            session.query(Ticket)
+            .filter(Ticket.ticket_id == ticket_id)
+            .order_by(Ticket.created_at.asc())
+            .all()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+
+        latest = max(rows, key=lambda r: r.id)
+        customer_email = latest.customer_email
+        subject = latest.subject or ""
+        message_id = latest.message_id or ""
+
+        # Send the reply
+        reply_subject = (
+            f"[Ticket #{ticket_id}] Re: {subject}"
+            if not subject.startswith("Re:") else subject
+        )
+        try:
+            reply_in_thread(customer_email, reply_subject, message_id, data.draft_reply)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to send email: {e}")
+
+        # Mark all rows closed and clear the draft
+        for row in rows:
+            row.ticket_status = "Closed"
+            row.ai_draft_reply = None
+
+        session.commit()
+
+        return {
+            "status": "success",
+            "message": f"Reply sent to {customer_email} and ticket #{ticket_id} closed.",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Tickets — delete (all messages in the thread)
+# ---------------------------------------------------------------------------
+
+@app.delete("/tickets/{ticket_id}")
+async def delete_ticket(ticket_id: int):
+    with Session(engine) as session:
+        rows = (
+            session.query(Ticket)
+            .filter(Ticket.ticket_id == ticket_id)
+            .all()
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        for row in rows:
+            session.delete(row)
+        session.commit()
+        return {"status": "success", "ticket_id": ticket_id, "deleted_rows": len(rows)}
