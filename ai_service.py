@@ -1,9 +1,8 @@
 import json
-import urllib.parse
-import requests
 from google import genai
 from google.genai import types
-from config import GEMINI_API_KEY, SERVER_URL, SIMILARITY_THRESHOLD
+from config import GEMINI_API_KEY, SIMILARITY_THRESHOLD
+from services import search_chunks
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -16,16 +15,12 @@ def generate_reply(prompt):
 def search_documents(query):
     if not query or not query.strip():
         return []
-    encoded_query = urllib.parse.quote(query)
-    url = f"{SERVER_URL}/search?query={encoded_query}"
     try:
-        response = requests.get(url, timeout=20)
-        response.raise_for_status()
-        data = response.json()
+        results = search_chunks(query=query, top_k=5)
         return [
-            result["text"]
-            for result in data.get("results", [])
-            if result.get("score", 0.0) >= SIMILARITY_THRESHOLD
+            hit.fields.get("text", "")
+            for hit in results.result.hits
+            if hit.score >= SIMILARITY_THRESHOLD
         ]
     except Exception as e:
         print(f"Search error: {e}")
@@ -182,3 +177,17 @@ Team Support-Pilot
 
 Reply:"""
     return generate_reply(prompt)
+
+
+def check_health() -> dict:
+    """Check Gemini API health with a simple and low-token generate content call."""
+    try:
+        client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="healthcheck",
+            config=types.GenerateContentConfig(max_output_tokens=1),
+        )
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+

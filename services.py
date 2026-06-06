@@ -115,3 +115,24 @@ def delete_document(document_id: str) -> int:
             session.delete(row)
         session.commit()
         return len(ids)
+
+
+def check_database_health() -> dict:
+    """Check database health by running a simple query."""
+    from sqlalchemy import text
+    try:
+        with Session(engine) as session:
+            session.execute(text("SELECT 1"))
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+
+def check_pinecone_health() -> dict:
+    """Check Pinecone health by calling describe_index_stats."""
+    try:
+        index.describe_index_stats()
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+

@@ -190,7 +190,7 @@ def process_inbox():
     blocked_keywords = [
         "no-reply", "noreply", "mailer-daemon",
         "notification", "notifications", "community",
-        "forum", "support", "helpdesk",
+        "forum"
     ]
 
     for e_id in email_ids:
@@ -277,7 +277,7 @@ def process_inbox():
                 )
                 session.add(new_row)
                 session.commit()
-                print(f"  ✔  Ticket #{ticket_id} saved (status={ticket_status})")
+                print(f"Ticket #{ticket_id} saved (status={ticket_status})")
 
             # ----------------------------------------------------------
             # Post-decision actions
@@ -307,13 +307,40 @@ def process_inbox():
                     reply_in_thread(sender_email, f"[Ticket #{ticket_id}] Re: {subject}",
                                     message_id, notify_body)
                 else:
-                    print("  ⚠  Escalate decision but no forward_to_email — treating as Pending.")
+                    print("Escalate decision but no forward_to_email — treating as Pending.")
 
             elif decision == "review_required":
                 # No email sent — draft stored for human review in the dashboard
-                print(f"  📋  Draft saved for Ticket #{ticket_id}, awaiting human approval.")
-
+                print(f"Draft saved for Ticket #{ticket_id}, awaiting human approval.")
+            
             mail.store(e_id, "+FLAGS", "\\Seen")
 
     mail.close()
     mail.logout()
+
+
+def check_email_imap_health() -> dict:
+    """Check IMAP connection and login health."""
+    if not EMAIL_USER or not EMAIL_PASS:
+        return {"status": "unhealthy", "error": "Email credentials missing"}
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=10)
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.logout()
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+
+def check_email_smtp_health() -> dict:
+    """Check SMTP connection and login health."""
+    if not EMAIL_USER or not EMAIL_PASS:
+        return {"status": "unhealthy", "error": "Email credentials missing"}
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+

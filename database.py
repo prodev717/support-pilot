@@ -46,7 +46,7 @@ class Ticket(Base):
     customer_email = Column(String(255), nullable=False)
     subject = Column(String(255), nullable=True)
     body = Column(String, nullable=True)
-    message_id = Column(String(255), nullable=True)
+    message_id = Column(String(255), nullable=True, unique=True)
     thread_id = Column(String(255), nullable=True)
     issue = Column(String(1000), nullable=True)  # question,request,complaint,issue,feedback,cancellation,refund,billing,technical,account,delivery,return,escalation,other
     severity = Column(String(50), nullable=True)  # low,medium,high

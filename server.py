@@ -1,6 +1,6 @@
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -14,8 +14,16 @@ from services import (
     store_chunks,
     search_chunks,
     delete_document,
+    check_database_health,
+    check_pinecone_health,
 )
-from email_service import reply_in_thread, send_email
+from email_service import (
+    reply_in_thread,
+    send_email,
+    check_email_imap_health,
+    check_email_smtp_health,
+)
+from ai_service import check_health as check_gemini_health
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
@@ -465,3 +473,45 @@ async def delete_ticket(ticket_id: int):
             session.delete(row)
         session.commit()
         return {"status": "success", "ticket_id": ticket_id, "deleted_rows": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# Health & Polling checks
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health_endpoint(response: Response):
+    db_status = check_database_health()
+    pinecone_status = check_pinecone_health()
+    gemini_status = check_gemini_health()
+    imap_status = check_email_imap_health()
+    smtp_status = check_email_smtp_health()
+
+    all_healthy = (
+        db_status["status"] == "healthy"
+        and pinecone_status["status"] == "healthy"
+        and gemini_status["status"] == "healthy"
+        and imap_status["status"] == "healthy"
+        and smtp_status["status"] == "healthy"
+    )
+
+    status = "healthy" if all_healthy else "unhealthy"
+    if not all_healthy:
+        response.status_code = 503
+
+    return {
+        "status": status,
+        "services": {
+            "database": db_status,
+            "pinecone": pinecone_status,
+            "gemini_api": gemini_status,
+            "email_imap": imap_status,
+            "email_smtp": smtp_status
+        }
+    }
+
+
+@app.get("/poll-check")
+async def poll_check_endpoint():
+    print("polling")
+    return {"status": "ok"}
