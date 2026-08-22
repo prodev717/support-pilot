@@ -47,8 +47,7 @@ The dashboard uses **SWR** (Stale-While-Revalidate) for smart data fetching:
 - PostgreSQL database
 - Pinecone vector index
 - Google Gemini API
-- Gmail IMAP connection
-- Gmail SMTP connection
+- Gmail IMAP/SMTP connection
 
 ---
 
