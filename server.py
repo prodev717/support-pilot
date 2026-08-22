@@ -251,6 +251,7 @@ def _ticket_row(r: Ticket) -> dict:
         "ticket_status": r.ticket_status,
         "ai_decision": r.ai_decision,
         "ai_draft_reply": r.ai_draft_reply,
+        "draft_sent": getattr(r, 'draft_sent', False),
         "forwarded_to": r.forwarded_to,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
@@ -325,7 +326,28 @@ async def get_ticket(ticket_id: int):
             raise HTTPException(status_code=404, detail="Ticket not found")
 
         latest = rows[-1]
-        messages = [_ticket_row(r) for r in rows]
+        
+        messages = []
+        for r in rows:
+            msg = _ticket_row(r)
+            msg["sender"] = "user"
+            messages.append(msg)
+            
+            if getattr(r, 'draft_sent', False) and getattr(r, 'ai_draft_reply', None):
+                ai_msg = {
+                    "id": f"ai_{r.id}",
+                    "ticket_id": r.ticket_id,
+                    "customer_email": "Support Pilot (AI)",
+                    "subject": f"Re: {r.subject}" if r.subject and not r.subject.startswith("Re:") else (r.subject or ""),
+                    "body": r.ai_draft_reply,
+                    "created_at": r.updated_at.isoformat() if r.updated_at else (r.created_at.isoformat() if r.created_at else None),
+                    "sender": "ai",
+                    "issue": r.issue,
+                    "severity": r.severity,
+                    "sentiment": "N/A",
+                    "emotion": "N/A"
+                }
+                messages.append(ai_msg)
 
         return {
             **_ticket_row(latest),
@@ -456,10 +478,11 @@ async def send_draft(ticket_id: int, data: TicketSendDraft):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to send email: {e}")
 
-        # Mark all rows closed and clear the draft
+        # Mark all rows closed and set the draft as sent on the latest row
         for row in rows:
             row.ticket_status = "Closed"
-            row.ai_draft_reply = None
+        latest.ai_draft_reply = data.draft_reply
+        latest.draft_sent = True
 
         session.commit()
 

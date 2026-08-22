@@ -153,10 +153,27 @@ function TicketsWorkspace() {
       setTicket((current) =>
         current
           ? {
-              ...current,
-              ticket_status: "Closed",
-              ai_draft_reply: null,
-            }
+            ...current,
+            ticket_status: "Closed",
+            draft_sent: true,
+            ai_draft_reply: draftReply,
+            messages: [
+              ...(current.messages || []),
+              {
+                id: `ai_new_${Date.now()}`,
+                ticket_id: current.ticket_id,
+                customer_email: "Support (AI)",
+                subject: `Re: ${current.subject}`,
+                body: draftReply,
+                created_at: new Date().toISOString(),
+                sender: "ai",
+                issue: current.issue,
+                severity: current.severity,
+                sentiment: "N/A",
+                emotion: "N/A"
+              }
+            ]
+          }
           : current
       );
       setTickets((current) =>
@@ -333,490 +350,491 @@ function TicketsWorkspace() {
           </div>
         ) : (
           <div className="grid h-full min-h-0 overflow-hidden rounded-lg border bg-white lg:grid-cols-3">
-          {/* LEFT PANEL */}
-          <aside className="grid min-h-0 grid-rows-[auto_1fr] border-r">
-            {/* Header */}
-            <div className="border-b bg-white p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            {/* LEFT PANEL */}
+            <aside className="grid min-h-0 grid-rows-[auto_1fr] border-r">
+              {/* Header */}
+              <div className="border-b bg-white p-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold">Tickets</h2>
+                    <p className="text-sm text-gray-500">
+                      {tickets.length} ticket{tickets.length !== 1 && "s"}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <select
+                      value={filterStatus}
+                      onChange={(event) => setFilterStatus(event.target.value)}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    >
+                      <option value="">All statuses</option>
+                      <option value="Open">Open</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Escalated">Escalated</option>
+                      <option value="Closed">Closed</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateModalOpen(true)}
+                      className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
+                    >
+                      Add Ticket
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Scrollable List */}
+              <div className="min-h-0 overflow-y-auto scrollbar-none">
+                {tickets.map((ticket) => (
+                  <button
+                    key={ticket.id}
+                    onClick={() => setSelectedTicket(ticket.ticket_id)}
+                    className={`w-full border-b p-4 text-left transition-colors hover:bg-gray-50 ${selectedTicket === ticket.ticket_id
+                      ? "bg-gray-100"
+                      : "bg-white"
+                      }`}
+                  >
+                    {/* Subject + Time */}
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="flex-1 truncate font-medium text-gray-900">
+                        {ticket.ticket_id}:{ticket.subject}
+                      </h3>
+
+                      <span className="shrink-0 text-xs text-gray-500">
+                        {new Intl.DateTimeFormat(navigator.language, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }).format(new Date(ticket.updated_at))}
+                      </span>
+                    </div>
+
+                    {/* Customer */}
+                    <p className="mt-1 truncate text-sm text-gray-500">
+                      {ticket.customer_email}
+                    </p>
+
+                    {/* Footer */}
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        {ticket.severity}
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-medium ${statusColor[ticket.ticket_status]
+                            }`}
+                        >
+                          {ticket.ticket_status}
+                        </span>
+
+                        <span className="text-xs text-gray-500">
+                          {ticket.message_count} message
+                          {ticket.message_count !== 1 && "s"}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </aside>
+            {/* RIGHT PANEL */}
+            <section className="min-h-0 overflow-y-auto bg-gray-50 lg:col-span-2">
+              {ticket && (
+                <div className="flex h-full flex-col">
+                  {/* Header */}
+                  <div className="border-b bg-white p-6">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h2 className="text-2xl font-semibold text-gray-900">
+                          {ticket.subject}
+                        </h2>
+
+                        <p className="mt-1 text-sm text-gray-500">
+                          Ticket #{ticket.ticket_id}, From: {ticket.customer_email}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`self-start rounded-full px-3 py-1 text-sm font-medium ${statusColor[ticket.ticket_status]
+                          }`}
+                      >
+                        {ticket.ticket_status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="flex-1 space-y-6 overflow-y-auto p-6">
+                    {/* Metadata */}
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+
+                      <div className="rounded-lg border bg-white p-4">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">
+                          Issue
+                        </p>
+                        <p className="mt-1 font-medium capitalize">{ticket.issue}</p>
+                      </div>
+
+                      <div className="rounded-lg border bg-white p-4">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">
+                          Severity
+                        </p>
+                        <p className="mt-1 font-medium capitalize">{ticket.severity}</p>
+                      </div>
+
+                      <div className="rounded-lg border bg-white p-4">
+                        <p className="text-xs uppercase tracking-wide text-gray-500">
+                          Sentiment
+                        </p>
+                        <p className="mt-1 capitalize font-medium">
+                          {ticket.sentiment} • {ticket.emotion}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* AI Analysis */}
+                    <div className="grid gap-6 xl:grid-cols-2">
+                      <div className="rounded-lg border bg-white p-5">
+                        <h3 className="mb-3 text-lg font-semibold">
+                          AI Decision
+                        </h3>
+
+                        <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
+                          {ticket.ai_decision}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg border bg-white p-5">
+                        <h3 className="mb-3 text-lg font-semibold">
+                          Suggested Reply
+                        </h3>
+
+                        <div className="mt-3">
+                          <textarea
+                            value={draftReply}
+                            onChange={(event) => setDraftReply(event.target.value)}
+                            placeholder="Edit the AI suggested reply before sending it to the customer."
+                            rows={10}
+                            disabled={ticket.draft_sent}
+                            className="min-h-[12rem] w-full resize-none rounded-md border border-black bg-white p-3 text-sm text-black disabled:bg-gray-100 disabled:text-gray-500 disabled:border-gray-300"
+                          />
+                        </div>
+
+                        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <button
+                            type="button"
+                            onClick={sendDraftReply}
+                            disabled={sending || !draftReply.trim() || ticket.draft_sent}
+                            className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
+                          >
+                            {sending ? "Sending..." : (ticket.draft_sent ? "Already Sent" : "Send Reply")}
+                          </button>
+
+                          {successMessage && (
+                            <p className="text-sm text-green-700">{successMessage}</p>
+                          )}
+                        </div>
+
+                        {!ticket.ai_draft_reply && (
+                          <p className="mt-3 text-sm text-gray-500">
+                            No suggested AI reply is available. Enter a reply above to send to the customer.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border bg-white p-5">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <h3 className="mb-1 text-lg font-semibold">Actions & Routing</h3>
+                          <p className="text-sm text-gray-500">Update status, severity, and assigned department for this ticket.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={updateTicket}
+                          disabled={updating}
+                          className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
+                        >
+                          {updating ? "Saving..." : "Save changes"}
+                        </button>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 md:grid-cols-3">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
+                          <select
+                            value={actionStatus}
+                            onChange={(event) => setActionStatus(event.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                          >
+                            <option value="">Select status</option>
+                            <option value="Open">Open</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Escalated">Escalated</option>
+                            <option value="Closed">Closed</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">Severity</label>
+                          <select
+                            value={actionSeverity}
+                            onChange={(event) => setActionSeverity(event.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                          >
+                            <option value="">Select severity</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Department</label>
+                          <select
+                            value={actionForwardedTo}
+                            onChange={(event) => setActionForwardedTo(event.target.value)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                          >
+                            <option value="">Unassigned</option>
+                            {departments.map((department) => (
+                              <option key={department.id} value={department.email}>
+                                {department.department}{department.email ? ` — ${department.email}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {updateSuccessMessage && (
+                        <p className="mt-4 text-sm text-green-700">{updateSuccessMessage}</p>
+                      )}
+                    </div>
+
+                    {/* Conversation */}
+                    <div className="rounded-lg border bg-white">
+                      <div className="border-b p-5">
+                        <h3 className="text-lg font-semibold">
+                          Conversation
+                        </h3>
+
+                        <p className="text-sm text-gray-500">
+                          {(ticket.messages ?? []).length} message
+                          {(ticket.messages ?? []).length !== 1 && "s"}
+                        </p>
+                      </div>
+
+                      <div className="divide-y">
+                        {[...(ticket.messages ?? [])]
+                          .sort(
+                            (a, b) =>
+                              new Date(a.created_at) - new Date(b.created_at)
+                          )
+                          .map((message, index) => (
+                            <div
+                              key={message.id}
+                              className={`space-y-4 p-5 ${message.sender === 'ai' ? 'bg-gray-50/50 border-l-4 border-gray-500' : ''}`}
+                            >
+                              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                  <h4 className="font-semibold text-gray-900">
+                                    {message.sender === 'ai' ? 'Support (AI)' : `Customer (${message.customer_email})`}
+                                  </h4>
+
+                                  <p className="text-sm text-gray-600">
+                                    {message.subject}
+                                  </p>
+                                </div>
+
+                                <span className="text-xs text-gray-500">
+                                  {new Intl.DateTimeFormat(navigator.language, {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(new Date(message.created_at))}
+                                </span>
+                              </div>
+
+                              <div className="rounded-md bg-gray-50 p-4">
+                                <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-gray-700">
+                                  {message.body}
+                                </pre>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 text-xs">
+                                <span className="rounded-full bg-gray-100 px-3 py-1">
+                                  Issue: {message.issue}
+                                </span>
+
+                                <span className="rounded-full bg-gray-100 px-3 py-1">
+                                  Severity: {message.severity}
+                                </span>
+
+                                <span className="rounded-full bg-gray-100 px-3 py-1">
+                                  Sentiment: {message.sentiment}
+                                </span>
+
+                                <span className="rounded-full bg-gray-100 px-3 py-1">
+                                  Emotion: {message.emotion}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={deleteTicket}
+                        disabled={deleting}
+                        className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
+                      >
+                        {deleting ? "Deleting..." : "Delete Ticket"}
+                      </button>
+
+                      {deleteSuccessMessage && (
+                        <p className="text-sm text-green-700">{deleteSuccessMessage}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {isCreateModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white p-6 shadow-xl">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-semibold">Tickets</h2>
-                  <p className="text-sm text-gray-500">
-                    {tickets.length} ticket{tickets.length !== 1 && "s"}
-                  </p>
+                  <h2 className="text-xl font-semibold">Create Ticket</h2>
+                  <p className="text-sm text-gray-500">Add a manual ticket for a customer request.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Customer Email</label>
+                  <input
+                    value={newTicketCustomerEmail}
+                    onChange={(event) => setNewTicketCustomerEmail(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    placeholder="customer@example.com"
+                  />
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Subject</label>
+                  <input
+                    value={newTicketSubject}
+                    onChange={(event) => setNewTicketSubject(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    placeholder="Issue subject"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Body</label>
+                  <textarea
+                    value={newTicketBody}
+                    onChange={(event) => setNewTicketBody(event.target.value)}
+                    rows={4}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    placeholder="Ticket description"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Issue</label>
+                  <input
+                    value={newTicketIssue}
+                    onChange={(event) => setNewTicketIssue(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    placeholder="Billing, support, etc."
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
                   <select
-                    value={filterStatus}
-                    onChange={(event) => setFilterStatus(event.target.value)}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                    value={newTicketStatus}
+                    onChange={(event) => setNewTicketStatus(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                   >
-                    <option value="">All statuses</option>
                     <option value="Open">Open</option>
                     <option value="Pending">Pending</option>
                     <option value="Escalated">Escalated</option>
                     <option value="Closed">Closed</option>
                   </select>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateModalOpen(true)}
-                    className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Severity</label>
+                  <select
+                    value={newTicketSeverity}
+                    onChange={(event) => setNewTicketSeverity(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                   >
-                    Add Ticket
-                  </button>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Department</label>
+                  <select
+                    value={newTicketAssignedTo}
+                    onChange={(event) => setNewTicketAssignedTo(event.target.value)}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                  >
+                    <option value="">Unassigned</option>
+                    {departments.map((department) => (
+                      <option key={department.id} value={department.email}>
+                        {department.department}{department.email ? ` — ${department.email}` : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            </div>
 
-            {/* Scrollable List */}
-            <div className="min-h-0 overflow-y-auto scrollbar-none">
-              {tickets.map((ticket) => (
+              {createTicketError && (
+                <p className="mt-4 text-sm text-red-700">{createTicketError}</p>
+              )}
+              {createTicketSuccessMessage && (
+                <p className="mt-4 text-sm text-green-700">{createTicketSuccessMessage}</p>
+              )}
+
+              <div className="mt-6 flex items-center justify-end gap-3">
                 <button
-                  key={ticket.id}
-                  onClick={() => setSelectedTicket(ticket.ticket_id)}
-                  className={`w-full border-b p-4 text-left transition-colors hover:bg-gray-50 ${selectedTicket === ticket.ticket_id
-                    ? "bg-gray-100"
-                    : "bg-white"
-                    }`}
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 >
-                  {/* Subject + Time */}
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="flex-1 truncate font-medium text-gray-900">
-                      {ticket.ticket_id}:{ticket.subject}
-                    </h3>
-
-                    <span className="shrink-0 text-xs text-gray-500">
-                      {new Intl.DateTimeFormat(navigator.language, {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      }).format(new Date(ticket.updated_at))}
-                    </span>
-                  </div>
-
-                  {/* Customer */}
-                  <p className="mt-1 truncate text-sm text-gray-500">
-                    {ticket.customer_email}
-                  </p>
-
-                  {/* Footer */}
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      {ticket.severity}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-medium ${statusColor[ticket.ticket_status]
-                          }`}
-                      >
-                        {ticket.ticket_status}
-                      </span>
-
-                      <span className="text-xs text-gray-500">
-                        {ticket.message_count} message
-                        {ticket.message_count !== 1 && "s"}
-                      </span>
-                    </div>
-                  </div>
+                  Cancel
                 </button>
-              ))}
-            </div>
-          </aside>
-          {/* RIGHT PANEL */}
-          <section className="min-h-0 overflow-y-auto bg-gray-50 lg:col-span-2">
-            {ticket && (
-              <div className="flex h-full flex-col">
-                {/* Header */}
-                <div className="border-b bg-white p-6">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-gray-900">
-                        {ticket.subject}
-                      </h2>
-
-                      <p className="mt-1 text-sm text-gray-500">
-                        Ticket #{ticket.ticket_id}, From: {ticket.customer_email}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`self-start rounded-full px-3 py-1 text-sm font-medium ${statusColor[ticket.ticket_status]
-                        }`}
-                    >
-                      {ticket.ticket_status}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 space-y-6 overflow-y-auto p-6">
-                  {/* Metadata */}
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-
-                    <div className="rounded-lg border bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
-                        Issue
-                      </p>
-                      <p className="mt-1 font-medium capitalize">{ticket.issue}</p>
-                    </div>
-
-                    <div className="rounded-lg border bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
-                        Severity
-                      </p>
-                      <p className="mt-1 font-medium capitalize">{ticket.severity}</p>
-                    </div>
-
-                    <div className="rounded-lg border bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">
-                        Sentiment
-                      </p>
-                      <p className="mt-1 capitalize font-medium">
-                        {ticket.sentiment} • {ticket.emotion}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* AI Analysis */}
-                  <div className="grid gap-6 xl:grid-cols-2">
-                    <div className="rounded-lg border bg-white p-5">
-                      <h3 className="mb-3 text-lg font-semibold">
-                        AI Decision
-                      </h3>
-
-                      <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
-                        {ticket.ai_decision}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg border bg-white p-5">
-                      <h3 className="mb-3 text-lg font-semibold">
-                        Suggested Reply
-                      </h3>
-
-                      <div className="mt-3">
-                        <textarea
-                          value={draftReply}
-                          onChange={(event) => setDraftReply(event.target.value)}
-                          placeholder="Edit the AI suggested reply before sending it to the customer."
-                          rows={10}
-                          className="min-h-[12rem] w-full resize-none rounded-md border border-black bg-white p-3 text-sm text-black"
-                        />
-                      </div>
-
-                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <button
-                          type="button"
-                          onClick={sendDraftReply}
-                          disabled={sending || !draftReply.trim()}
-                          className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
-                        >
-                          {sending ? "Sending..." : "Send Reply"}
-                        </button>
-
-                        {successMessage && (
-                          <p className="text-sm text-green-700">{successMessage}</p>
-                        )}
-                      </div>
-
-                      {!ticket.ai_draft_reply && (
-                        <p className="mt-3 text-sm text-gray-500">
-                          No suggested AI reply is available. Enter a reply above to send to the customer.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border bg-white p-5">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="mb-1 text-lg font-semibold">Actions & Routing</h3>
-                        <p className="text-sm text-gray-500">Update status, severity, and assigned department for this ticket.</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={updateTicket}
-                        disabled={updating}
-                        className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
-                      >
-                        {updating ? "Saving..." : "Save changes"}
-                      </button>
-                    </div>
-
-                    <div className="mt-5 grid gap-4 md:grid-cols-3">
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
-                        <select
-                          value={actionStatus}
-                          onChange={(event) => setActionStatus(event.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                        >
-                          <option value="">Select status</option>
-                          <option value="Open">Open</option>
-                          <option value="Pending">Pending</option>
-                          <option value="Escalated">Escalated</option>
-                          <option value="Closed">Closed</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-gray-700">Severity</label>
-                        <select
-                          value={actionSeverity}
-                          onChange={(event) => setActionSeverity(event.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                        >
-                          <option value="">Select severity</option>
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Department</label>
-                        <select
-                          value={actionForwardedTo}
-                          onChange={(event) => setActionForwardedTo(event.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                        >
-                          <option value="">Unassigned</option>
-                          {departments.map((department) => (
-                            <option key={department.id} value={department.email}>
-                              {department.department}{department.email ? ` — ${department.email}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {updateSuccessMessage && (
-                      <p className="mt-4 text-sm text-green-700">{updateSuccessMessage}</p>
-                    )}
-                  </div>
-
-                  {/* Conversation */}
-                  <div className="rounded-lg border bg-white">
-                    <div className="border-b p-5">
-                      <h3 className="text-lg font-semibold">
-                        Conversation
-                      </h3>
-
-                      <p className="text-sm text-gray-500">
-                        {(ticket.messages ?? []).length} message
-                        {(ticket.messages ?? []).length !== 1 && "s"}
-                      </p>
-                    </div>
-
-                    <div className="divide-y">
-                      {[...(ticket.messages ?? [])]
-                        .sort(
-                          (a, b) =>
-                            new Date(a.created_at) - new Date(b.created_at)
-                        )
-                        .map((message, index) => (
-                          <div
-                            key={message.id}
-                            className="space-y-4 p-5"
-                          >
-                            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                              <div>
-                                <h4 className="font-semibold text-gray-900">
-                                  Message {index + 1}
-                                </h4>
-
-                                <p className="text-sm text-gray-600">
-                                  {message.subject}
-                                </p>
-                              </div>
-
-                              <span className="text-xs text-gray-500">
-                                {new Intl.DateTimeFormat(navigator.language, {
-                                  dateStyle: "medium",
-                                  timeStyle: "short",
-                                }).format(new Date(message.created_at))}
-                              </span>
-                            </div>
-
-                            <div className="rounded-md bg-gray-50 p-4">
-                              <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-gray-700">
-                                {message.body}
-                              </pre>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2 text-xs">
-                              <span className="rounded-full bg-gray-100 px-3 py-1">
-                                Issue: {message.issue}
-                              </span>
-
-                              <span className="rounded-full bg-gray-100 px-3 py-1">
-                                Severity: {message.severity}
-                              </span>
-
-                              <span className="rounded-full bg-gray-100 px-3 py-1">
-                                Sentiment: {message.sentiment}
-                              </span>
-
-                              <span className="rounded-full bg-gray-100 px-3 py-1">
-                                Emotion: {message.emotion}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <button
-                      type="button"
-                      onClick={deleteTicket}
-                      disabled={deleting}
-                      className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
-                    >
-                      {deleting ? "Deleting..." : "Delete Ticket"}
-                    </button>
-
-                    {deleteSuccessMessage && (
-                      <p className="text-sm text-green-700">{deleteSuccessMessage}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-      )}
-
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold">Create Ticket</h2>
-                <p className="text-sm text-gray-500">Add a manual ticket for a customer request.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCreateModalOpen(false)}
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-medium text-gray-700">Customer Email</label>
-                <input
-                  value={newTicketCustomerEmail}
-                  onChange={(event) => setNewTicketCustomerEmail(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  placeholder="customer@example.com"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-medium text-gray-700">Subject</label>
-                <input
-                  value={newTicketSubject}
-                  onChange={(event) => setNewTicketSubject(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  placeholder="Issue subject"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-medium text-gray-700">Body</label>
-                <textarea
-                  value={newTicketBody}
-                  onChange={(event) => setNewTicketBody(event.target.value)}
-                  rows={4}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  placeholder="Ticket description"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Issue</label>
-                <input
-                  value={newTicketIssue}
-                  onChange={(event) => setNewTicketIssue(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                  placeholder="Billing, support, etc."
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
-                <select
-                  value={newTicketStatus}
-                  onChange={(event) => setNewTicketStatus(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                <button
+                  type="button"
+                  onClick={createTicket}
+                  className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
                 >
-                  <option value="Open">Open</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Escalated">Escalated</option>
-                  <option value="Closed">Closed</option>
-                </select>
+                  Create Ticket
+                </button>
               </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Severity</label>
-                <select
-                  value={newTicketSeverity}
-                  onChange={(event) => setNewTicketSeverity(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-2 block text-sm font-medium text-gray-700">Assigned Department</label>
-                <select
-                  value={newTicketAssignedTo}
-                  onChange={(event) => setNewTicketAssignedTo(event.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                >
-                  <option value="">Unassigned</option>
-                  {departments.map((department) => (
-                    <option key={department.id} value={department.email}>
-                      {department.department}{department.email ? ` — ${department.email}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {createTicketError && (
-              <p className="mt-4 text-sm text-red-700">{createTicketError}</p>
-            )}
-            {createTicketSuccessMessage && (
-              <p className="mt-4 text-sm text-green-700">{createTicketSuccessMessage}</p>
-            )}
-
-            <div className="mt-6 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setIsCreateModalOpen(false)}
-                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={createTicket}
-                className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
-              >
-                Create Ticket
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </div>
     </>
   );

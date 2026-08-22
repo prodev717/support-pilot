@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import Column, Integer, String, DateTime, create_engine, func
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, create_engine, func
 from sqlalchemy.orm import DeclarativeBase
 
 load_dotenv()
@@ -55,6 +55,7 @@ class Ticket(Base):
     ticket_status = Column(String(50), nullable=True, default="Open")  # Open,Closed,Pending,Escalated
     ai_decision = Column(String(1000), nullable=True)  # auto_resolve,review_required,escalate
     ai_draft_reply = Column(String, nullable=True)  # AI-generated draft for review_required tickets
+    draft_sent = Column(Boolean, nullable=True, default=False)
     forwarded_to = Column(String(255), nullable=True)  # if escalated, to which email
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

@@ -194,16 +194,20 @@ def process_inbox():
     ]
 
     for e_id in email_ids:
-        res, msg_data = mail.fetch(e_id, "(RFC822)")
+        res, msg_data = mail.fetch(e_id, "(X-GM-THRID RFC822)")
         for response_part in msg_data:
             if not isinstance(response_part, tuple):
                 continue
+
+            imap_meta = response_part[0].decode('utf-8', errors='ignore')
+            m_thrid = re.search(r'X-GM-THRID\s+(\d+)', imap_meta)
+            gmail_thread_id = m_thrid.group(1) if m_thrid else None
 
             msg = email.message_from_bytes(response_part[1])
             _, sender_email = parseaddr(msg["From"])
             subject = clean_header(msg.get("Subject", ""))
             message_id = msg.get("Message-ID", "").strip()
-            thread_id = msg.get("X-GM-THRID") or msg.get("Thread-Index") or None
+            thread_id = gmail_thread_id or msg.get("Thread-Index") or None
             references = msg.get("References", "")
 
             print(f"\nProcessing: {sender_email} — {subject}")
@@ -273,6 +277,7 @@ def process_inbox():
                     ticket_status=ticket_status,
                     ai_decision=f"{decision}: {analysis['explanation']}",
                     ai_draft_reply=analysis["draft_reply"],
+                    draft_sent=(decision == "auto_resolve"),
                     forwarded_to=analysis["forward_to_email"],
                 )
                 session.add(new_row)
