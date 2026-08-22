@@ -39,8 +39,7 @@ app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 origins = [
-    "http://localhost:5173",
-    "http://localhost:8000"
+    "http://localhost:5173"
 ]
 
 app.add_middleware(
@@ -50,15 +49,6 @@ app.add_middleware(
     allow_methods=["*"], 
     allow_headers=["*"]
 )
-
-
-# ---------------------------------------------------------------------------
-# HTML Dashboard
-# ---------------------------------------------------------------------------
-
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse(request=request, name="upload.html")
 
 
 # ---------------------------------------------------------------------------

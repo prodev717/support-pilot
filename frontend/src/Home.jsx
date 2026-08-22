@@ -1,4 +1,7 @@
-﻿import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { useCache } from "./useCache";
+
+const apiUrl = import.meta.env.VITE_API_URL ?? "";
 
 function HealthBadge({ status }) {
   const isHealthy = status === "healthy";
@@ -10,50 +13,19 @@ function HealthBadge({ status }) {
 }
 
 function Home() {
-  const apiUrl = import.meta.env.VITE_API_URL ?? "";
-  const [tickets, setTickets] = useState([]);
-  const [documents, setDocuments] = useState([]);
-  const [emails, setEmails] = useState([]);
-  const [health, setHealth] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { data: tickets = [], isValidating: ticketsValidating, refresh: refreshTickets } = useCache(`${apiUrl}/tickets`);
+  const { data: documents = [], isValidating: docsValidating, refresh: refreshDocuments } = useCache(`${apiUrl}/documents`);
+  const { data: emails = [], isValidating: emailsValidating, refresh: refreshEmails } = useCache(`${apiUrl}/emails`);
+  const { data: health, isValidating: healthValidating, refresh: refreshHealth } = useCache(`${apiUrl}/health`);
 
-  useEffect(() => {
-    const fetchAnalytics = async () => {
-      setLoading(true);
-      setError(null);
+  const isSyncing = ticketsValidating || docsValidating || emailsValidating || healthValidating;
 
-      try {
-        const [ticketsResponse, documentsResponse, emailsResponse, healthResponse] = await Promise.all([
-          fetch(`${apiUrl}/tickets`),
-          fetch(`${apiUrl}/documents`),
-          fetch(`${apiUrl}/emails`),
-          fetch(`${apiUrl}/health`),
-        ]);
-
-        if (!ticketsResponse.ok || !documentsResponse.ok || !emailsResponse.ok || !healthResponse.ok) {
-          throw new Error("One or more analytics endpoints returned an error.");
-        }
-
-        const ticketsData = await ticketsResponse.json();
-        const documentsData = await documentsResponse.json();
-        const emailsData = await emailsResponse.json();
-        const healthData = await healthResponse.json();
-
-        setTickets(Array.isArray(ticketsData) ? ticketsData : []);
-        setDocuments(Array.isArray(documentsData) ? documentsData : []);
-        setEmails(Array.isArray(emailsData) ? emailsData : []);
-        setHealth(healthData);
-      } catch (fetchError) {
-        console.error(fetchError);
-        setError("Unable to load analytics. Please refresh or try again later.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAnalytics();
-  }, [apiUrl]);
+  const refreshAll = () => {
+    refreshTickets();
+    refreshDocuments();
+    refreshEmails();
+    refreshHealth();
+  };
 
   const ticketCounts = tickets.reduce(
     (stats, item) => {
@@ -76,15 +48,28 @@ function Home() {
               Overview of tickets, knowledge base documents, email routing volume, and system health.
             </p>
           </div>
-          <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700">
-            {loading ? "Loading analytics..." : health?.status ? `System ${health.status}` : "Analytics ready"}
+          <div className="flex items-center gap-3">
+            {isSyncing && (
+              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                <RefreshCw size={13} className="animate-spin" />
+                Syncing…
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={refreshAll}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700">
+              {isSyncing ? "Syncing…" : health?.status ? `System ${health.status}` : "Analytics ready"}
+            </div>
           </div>
         </div>
       </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>
-      )}
 
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="rounded-lg border bg-white p-6 shadow-sm">

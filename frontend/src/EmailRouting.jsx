@@ -1,11 +1,13 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { useCache } from "./useCache";
 
 function EmailRouting() {
   const apiUrl = import.meta.env.VITE_API_URL;
 
-  const [emails, setEmails] = useState([]);
+  const { data: emails = [], isValidating, refresh, mutate } = useCache(`${apiUrl}/emails`);
+
   const [selectedEmail, setSelectedEmail] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
@@ -21,31 +23,14 @@ function EmailRouting() {
   const [newDescription, setNewDescription] = useState("");
   const [newError, setNewError] = useState(null);
 
-  const loadEmails = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${apiUrl}/emails`);
-      if (!response.ok) {
-        throw new Error(`Unable to load routes: ${response.status}`);
-      }
-      const data = await response.json();
-      setEmails(data);
-      if (data.length && !selectedEmail) {
-        setSelectedEmail(data[0].id);
-      }
-    } catch (loadError) {
-      console.error(loadError);
-      setError("Unable to load email routing configuration.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Auto-select first route when data loads
   useEffect(() => {
-    loadEmails();
-  }, []);
+    if (emails.length && !selectedEmail) {
+      setSelectedEmail(emails[0].id);
+    }
+  }, [emails]);
 
+  // Populate edit form when selection changes
   useEffect(() => {
     if (!selectedEmail) {
       setDepartment("");
@@ -53,7 +38,6 @@ function EmailRouting() {
       setDescription("");
       return;
     }
-
     const route = emails.find((item) => item.id === selectedEmail);
     if (route) {
       setDepartment(route.department || "");
@@ -63,14 +47,10 @@ function EmailRouting() {
   }, [selectedEmail, emails]);
 
   const saveEmailRoute = async () => {
-    if (!selectedEmail) {
-      return;
-    }
-
+    if (!selectedEmail) return;
     setSaving(true);
     setError(null);
     setSuccessMessage(null);
-
     try {
       const response = await fetch(`${apiUrl}/emails/${selectedEmail}`, {
         method: "PUT",
@@ -81,19 +61,14 @@ function EmailRouting() {
           description: description || null,
         }),
       });
-
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         throw new Error(result?.detail || `Status ${response.status}`);
       }
-
       const result = await response.json();
-      if (result.status !== "success") {
-        throw new Error("Unable to save route.");
-      }
-
+      if (result.status !== "success") throw new Error("Unable to save route.");
       setSuccessMessage("Email routing updated successfully.");
-      loadEmails();
+      mutate();
     } catch (saveError) {
       console.error(saveError);
       setError(`Unable to save route: ${saveError.message}`);
@@ -103,28 +78,20 @@ function EmailRouting() {
   };
 
   const deleteEmailRoute = async () => {
-    if (!selectedEmail) {
-      return;
-    }
-
+    if (!selectedEmail) return;
     setDeleting(true);
     setError(null);
     setSuccessMessage(null);
-
     try {
-      const response = await fetch(`${apiUrl}/emails/${selectedEmail}`, {
-        method: "DELETE",
-      });
-
+      const response = await fetch(`${apiUrl}/emails/${selectedEmail}`, { method: "DELETE" });
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         throw new Error(result?.detail || `Status ${response.status}`);
       }
-
       await response.json().catch(() => null);
       setSuccessMessage("Email routing deleted successfully.");
       setSelectedEmail(null);
-      loadEmails();
+      mutate();
     } catch (deleteError) {
       console.error(deleteError);
       setError(`Unable to delete route: ${deleteError.message}`);
@@ -139,11 +106,9 @@ function EmailRouting() {
       setNewError("Department and email are required.");
       return;
     }
-
     setSaving(true);
     setError(null);
     setSuccessMessage(null);
-
     try {
       const response = await fetch(`${apiUrl}/emails`, {
         method: "POST",
@@ -154,23 +119,18 @@ function EmailRouting() {
           description: newDescription || null,
         }),
       });
-
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         throw new Error(result?.detail || `Status ${response.status}`);
       }
-
       const result = await response.json();
-      if (result.status !== "success") {
-        throw new Error("Unable to create route.");
-      }
-
+      if (result.status !== "success") throw new Error("Unable to create route.");
       setSuccessMessage("Email routing created successfully.");
       setCreateModalOpen(false);
       setNewDepartment("");
       setNewEmail("");
       setNewDescription("");
-      await loadEmails();
+      await mutate();
       setSelectedEmail(result.email.id);
     } catch (createError) {
       console.error(createError);
@@ -187,13 +147,24 @@ function EmailRouting() {
           <h1 className="text-2xl font-semibold">Email Routing</h1>
           <p className="text-sm text-gray-500">Manage department routing addresses and descriptions.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreateModalOpen(true)}
-          className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
-        >
-          Add Route
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isValidating}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isValidating ? "animate-spin" : ""} />
+            {isValidating ? "Syncing…" : "Refresh"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-md border border-black bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
+          >
+            Add Route
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -214,7 +185,7 @@ function EmailRouting() {
           </div>
 
           <div className="space-y-2">
-            {loading ? (
+            {isValidating && emails.length === 0 ? (
               <div className="text-sm text-gray-500">Loading routes...</div>
             ) : emails.length === 0 ? (
               <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-500">

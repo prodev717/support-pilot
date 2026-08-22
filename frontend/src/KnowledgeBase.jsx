@@ -1,9 +1,12 @@
-﻿import { useEffect, useState } from "react";
+import { useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { useCache } from "./useCache";
 
 function KnowledgeBase() {
   const apiUrl = import.meta.env.VITE_API_URL;
 
-  const [documents, setDocuments] = useState([]);
+  const { data: documents = [], isValidating, refresh, mutate } = useCache(`${apiUrl}/documents`);
+
   const [searchResults, setSearchResults] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [topK, setTopK] = useState(5);
@@ -16,26 +19,6 @@ function KnowledgeBase() {
   const [error, setError] = useState(null);
   const [uploadSuccessMessage, setUploadSuccessMessage] = useState(null);
   const [searchMessage, setSearchMessage] = useState(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const loadDocuments = async () => {
-    setError(null);
-    try {
-      const response = await fetch(`${apiUrl}/documents`);
-      if (!response.ok) {
-        throw new Error(`Failed to load documents: ${response.status}`);
-      }
-      const data = await response.json();
-      setDocuments(data);
-    } catch (loadError) {
-      console.error(loadError);
-      setError("Unable to load documents. Please refresh the page.");
-    }
-  };
-
-  useEffect(() => {
-    loadDocuments();
-  }, [refreshKey]);
 
   const handleUpload = async () => {
     setError(null);
@@ -67,7 +50,7 @@ function KnowledgeBase() {
       setDocumentFile(null);
       setSearchResults([]);
       setSearchMessage(null);
-      setRefreshKey((current) => current + 1);
+      mutate(); // Revalidate document list
     } catch (uploadError) {
       console.error(uploadError);
       setError(`Upload failed: ${uploadError.message}`);
@@ -116,7 +99,7 @@ function KnowledgeBase() {
         const result = await response.json().catch(() => null);
         throw new Error(result?.detail || `Status ${response.status}`);
       }
-      setRefreshKey((current) => current + 1);
+      mutate(); // Revalidate document list
     } catch (deleteError) {
       console.error(deleteError);
       setError(`Unable to delete document: ${deleteError.message}`);
@@ -132,6 +115,15 @@ function KnowledgeBase() {
           <h1 className="text-2xl font-semibold">Knowledge Base</h1>
           <p className="text-sm text-gray-500">Upload content, query the index, and manage documents.</p>
         </div>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={isValidating}
+          className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={isValidating ? "animate-spin" : ""} />
+          {isValidating ? "Syncing…" : "Refresh"}
+        </button>
       </div>
 
       {error && (

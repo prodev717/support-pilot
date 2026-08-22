@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
+import { RefreshCw } from "lucide-react";
+import { useCache } from "./useCache";
 
 function TicketsWorkspace() {
   const apiUrl = import.meta.env.VITE_API_URL;
 
-  const [tickets, setTickets] = useState([]);
-  const [ticket, setTicket] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [error, setError] = useState(null);
   const [draftReply, setDraftReply] = useState("");
@@ -14,7 +14,6 @@ function TicketsWorkspace() {
   const [successMessage, setSuccessMessage] = useState(null);
   const [updateSuccessMessage, setUpdateSuccessMessage] = useState(null);
   const [deleteSuccessMessage, setDeleteSuccessMessage] = useState(null);
-  const [departments, setDepartments] = useState([]);
   const [actionStatus, setActionStatus] = useState("");
   const [actionSeverity, setActionSeverity] = useState("");
   const [actionForwardedTo, setActionForwardedTo] = useState("");
@@ -30,82 +29,42 @@ function TicketsWorkspace() {
   const [createTicketError, setCreateTicketError] = useState(null);
   const [createTicketSuccessMessage, setCreateTicketSuccessMessage] = useState(null);
 
-  const fetchTickets = async (statusFilter = filterStatus) => {
-    try {
-      const url = statusFilter
-        ? `${apiUrl}/tickets?status=${encodeURIComponent(statusFilter)}`
-        : `${apiUrl}/tickets`;
-      const response = await fetch(url);
+  // SWR-backed cached data
+  const ticketsUrl = filterStatus
+    ? `${apiUrl}/tickets?status=${encodeURIComponent(filterStatus)}`
+    : `${apiUrl}/tickets`;
 
-      if (!response.ok) {
-        throw new Error(`Failed to load tickets: ${response.status}`);
-      }
+  const {
+    data: tickets = [],
+    isValidating: ticketsValidating,
+    refresh: refreshTickets,
+    mutate: mutateTickets,
+  } = useCache(ticketsUrl);
 
-      const data = await response.json();
-      setTickets(data);
+  const {
+    data: ticket,
+    isValidating: ticketValidating,
+    refresh: refreshTicket,
+    mutate: mutateTicket,
+  } = useCache(selectedTicket ? `${apiUrl}/tickets/${selectedTicket}` : null);
 
-      if (Array.isArray(data) && data.length) {
-        setSelectedTicket((current) => {
-          if (current && data.some((item) => item.ticket_id === current)) {
-            return current;
-          }
-          return data[0].ticket_id;
-        });
-      } else {
-        setSelectedTicket(null);
-      }
-    } catch (fetchError) {
-      console.error(fetchError);
-      setError("Unable to load tickets. Please refresh the page.");
-    }
+  const { data: departments = [] } = useCache(`${apiUrl}/emails`);
+
+  const isSyncing = ticketsValidating || ticketValidating;
+
+  const refreshAll = () => {
+    refreshTickets();
+    if (selectedTicket) refreshTicket();
   };
 
+  // Auto-select first ticket when list loads
   useEffect(() => {
-    const fetchDepartments = async () => {
-      try {
-        const response = await fetch(`${apiUrl}/emails`);
-        if (!response.ok) {
-          throw new Error(`Failed to load departments: ${response.status}`);
-        }
-        const data = await response.json();
-        setDepartments(data);
-      } catch (fetchError) {
-        console.error(fetchError);
-      }
-    };
-
-    fetchDepartments();
-  }, []);
-
-  useEffect(() => {
-    fetchTickets();
-  }, [filterStatus]);
-
-  useEffect(() => {
-    if (!selectedTicket) {
-      return;
+    if (tickets.length && !selectedTicket) {
+      setSelectedTicket(tickets[0].ticket_id);
     }
+  }, [tickets]);
 
-    const fetchTicket = async () => {
-      try {
-        const response = await fetch(`${apiUrl}/tickets/${selectedTicket}`);
-
-        if (!response.ok) {
-          throw new Error(`Failed to load ticket: ${response.status}`);
-        }
-
-        const data = await response.json();
-        setTicket(data);
-        console.log("Selected Ticket Data:", data);
-      } catch (fetchError) {
-        console.error(fetchError);
-        setError("Unable to load the selected ticket. Please try again.");
-      }
-    };
-
-    fetchTicket();
-  }, [selectedTicket]);
-
+  // Sync form fields when ticket data changes
   useEffect(() => {
     if (!ticket) {
       setDraftReply("");
@@ -150,38 +109,9 @@ function TicketsWorkspace() {
 
       const result = await response.json().catch(() => null);
       setSuccessMessage(result?.message || "Reply sent successfully.");
-      setTicket((current) =>
-        current
-          ? {
-            ...current,
-            ticket_status: "Closed",
-            draft_sent: true,
-            ai_draft_reply: draftReply,
-            messages: [
-              ...(current.messages || []),
-              {
-                id: `ai_new_${Date.now()}`,
-                ticket_id: current.ticket_id,
-                customer_email: "Support (AI)",
-                subject: `Re: ${current.subject}`,
-                body: draftReply,
-                created_at: new Date().toISOString(),
-                sender: "ai",
-                issue: current.issue,
-                severity: current.severity,
-                sentiment: "N/A",
-                emotion: "N/A"
-              }
-            ]
-          }
-          : current
-      );
-      setTickets((current) =>
-        current.map((item) =>
-          item.ticket_id === ticket.ticket_id ? { ...item, ticket_status: "Closed" } : item
-        )
-      );
-      setDraftReply("");
+      // Revalidate both the detail and the list
+      await mutateTicket();
+      await mutateTickets();
     } catch (sendError) {
       console.error(sendError);
       setError(`Unable to send reply: ${sendError.message}`);
@@ -219,21 +149,8 @@ function TicketsWorkspace() {
 
       const result = await response.json().catch(() => null);
       setUpdateSuccessMessage(result?.status === "success" ? "Ticket updated successfully." : "Ticket updated successfully.");
-
-      const updatedTicket = {
-        ...ticket,
-        ticket_status: actionStatus,
-        severity: actionSeverity,
-        forwarded_to: actionForwardedTo,
-      };
-      setTicket(updatedTicket);
-      setTickets((current) =>
-        current.map((item) =>
-          item.ticket_id === ticket.ticket_id
-            ? { ...item, ticket_status: actionStatus }
-            : item
-        )
-      );
+      await mutateTicket();
+      await mutateTickets();
     } catch (updateError) {
       console.error(updateError);
       setError(`Unable to update ticket: ${updateError.message}`);
@@ -263,9 +180,8 @@ function TicketsWorkspace() {
 
       await response.json().catch(() => null);
       setDeleteSuccessMessage(`Ticket #${ticket.ticket_id} deleted successfully.`);
-      setTickets((current) => current.filter((item) => item.ticket_id !== ticket.ticket_id));
-      setTicket(null);
       setSelectedTicket(null);
+      await mutateTickets();
     } catch (deleteError) {
       console.error(deleteError);
       setError(`Unable to delete ticket: ${deleteError.message}`);
@@ -317,7 +233,7 @@ function TicketsWorkspace() {
       setNewTicketSeverity("medium");
       setNewTicketStatus("Open");
       setNewTicketAssignedTo("");
-      await fetchTickets();
+      await mutateTickets();
       setSelectedTicket(result.ticket.ticket_id);
     } catch (createError) {
       console.error(createError);
@@ -335,11 +251,30 @@ function TicketsWorkspace() {
   return (
     <>
       <div className="flex flex-col gap-4 px-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Tickets Workspace</h1>
-          <p className="text-sm text-gray-500">
-            View, route, and manage incoming support tickets with status, severity, and assignment controls.
-          </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Tickets Workspace</h1>
+            <p className="text-sm text-gray-500">
+              View, route, and manage incoming support tickets with status, severity, and assignment controls.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {isSyncing && (
+              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                <RefreshCw size={13} className="animate-spin" />
+                Syncing…
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={refreshAll}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
